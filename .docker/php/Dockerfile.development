@@ -1,0 +1,62 @@
+FROM php:8.2-fpm
+
+ARG MYSQL_HOST
+ENV MYSQL_HOST=$MYSQL_HOST
+
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    nginx-full \
+    wget \
+    openssl \
+    ca-certificates \
+    curl \
+    zlib1g-dev \
+    libmcrypt-dev \
+    libzip-dev \
+    redis \
+    libssl-dev \
+    cron \
+    ffmpeg \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libfreetype6-dev \
+    vim \
+    zip \
+    git
+
+RUN docker-php-ext-install exif
+RUN docker-php-ext-install pdo pdo_mysql
+RUN docker-php-ext-install pdo pdo_mysql zip
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg
+RUN docker-php-ext-install -j$(nproc) gd
+RUN pecl install mongodb
+RUN pecl clear-cache
+RUN docker-php-ext-enable mongodb
+RUN docker-php-ext-enable exif
+
+RUN wget https://getcomposer.org/installer -O - -q | php -- --install-dir=/bin --filename=composer --quiet
+
+COPY .docker/nginx/default.conf /etc/nginx/sites-available/default
+COPY .docker/php/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY .docker/php/generate_jwt_keys.sh /usr/local/bin/generate_jwt_keys.sh
+COPY .docker/php/wait-for-it.sh /usr/local/bin/wait-for-it.sh
+COPY .docker/php/uploads.ini /usr/local/etc/php/conf.d/
+COPY .docker/php/php.ini "$PHP_INI_DIR/php.ini"
+RUN ln -s /usr/local/bin/docker-entrypoint.sh /entry-point.sh
+RUN mkdir /var/log/php-fpm && chown -R www-data:www-data /var/log/php-fpm
+RUN echo 'php_admin_value[error_log] = /var/log/php-fpm/fpm-php.www.log' >> /usr/local/etc/php-fpm.d/www.conf
+RUN echo 'php_admin_flag[log_errors] = on' >> /usr/local/etc/php-fpm.d/www.conf
+
+RUN chmod 0777 /entry-point.sh \
+    && chmod 0777 /usr/local/bin/generate_jwt_keys.sh \
+    && chmod 0777 /usr/local/bin/wait-for-it.sh
+WORKDIR /var/www/html/
+
+COPY . /var/www/html
+RUN composer install
+
+RUN chown -R www-data:www-data /var/www/html
+
+EXPOSE 80
+
+ENTRYPOINT ["/entry-point.sh"]
